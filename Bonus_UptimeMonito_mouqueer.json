@@ -1,0 +1,274 @@
+{
+ "name": "Bonus - Uptime Monitor",
+ "nodes": [
+ {
+ "parameters": {
+ "rule": {
+ "interval": [
+ {
+ "field": "minutes",
+ "minutesInterval": 5
+ }
+ ]
+ }
+ },
+ "id": "d07a6e77-29a1-44d9-b1e6-e83f45338a37",
+ "name": "Every 5 Minutes",
+ "type": "n8n-nodes-base.scheduleTrigger",
+ "typeVersion": 1.2,
+ "position": [
+ 0,
+ 200
+ ]
+ },
+ {
+ "parameters": {
+ "jsCode": "return [{ json: { t0: Date.now(), url: 'https://demo.realworld.io' } }];"
+ },
+ "id": "ec19b0cc-2f57-4c65-ba2f-d981b811ba26",
+ "name": "Start Timer",
+ "type": "n8n-nodes-base.code",
+ "typeVersion": 2,
+ "position": [
+ 220,
+ 200
+ ]
+ },
+ {
+ "parameters": {
+ "url": "={{ $json.url }}",
+ "options": {
+ "timeout": 10000,
+ "response": {
+ "response": {
+ "fullResponse": true,
+ "neverError": true,
+ "responseFormat": "text"
+ }
+ }
+ }
+ },
+ "id": "e6a5d97e-e945-4c13-8220-15e437cfb828",
+ "name": "HTTP Health Check",
+ "type": "n8n-nodes-base.httpRequest",
+ "typeVersion": 4.2,
+ "position": [
+ 440,
+ 200
+ ],
+ "onError": "continueRegularOutput",
+ "retryOnFail": true,
+ "maxTries": 3,
+ "waitBetweenTries": 3000
+ },
+ {
+ "parameters": {
+ "jsCode": "// Combine HTTP result + response time. Works for both success and error-output items.\nconst j = $input.first().json;\nconst t0 =
+$('Start Timer').first().json.t0;\nconst ms = Date.now() - t0;\nconst code = Number(j.statusCode ?? (j.error && (j.error.httpCode || j.error.status))
+?? 0) || 0;\nconst ok = code === 200;\n\n// keep rolling stats for the daily summary (persists only in active/production runs)\nconst s =
+$getWorkflowStaticData('global');\ns.checks = (s.checks || 0) + 1;\ns.failures = (s.failures || 0) + (ok ? 0 : 1);\ns.totalMs = (s.totalMs || 0) +
+ms;\ns.maxMs = Math.max(s.maxMs || 0, ms);\n\nconst reason = code === 0 ? 'no response / timeout / DNS error' : `HTTP ${code}`;\nreturn [{ json: { ok,
+ code, ms,\n alert: `■ **App DOWN**: ${$('Start Timer').first().json.url}\\nStatus: ${reason}\\nResponse time: ${ms} ms\\nTime: ${new
+Date().toISOString()}` } }];"
+ },
+ "id": "c2c67e5e-04e5-40e6-a8c3-37bc280abc26",
+ "name": "Evaluate Result",
+ "type": "n8n-nodes-base.code",
+ "typeVersion": 2,
+ "position": [
+ 660,
+ 200
+ ]
+ },
+ {
+ "parameters": {
+ "conditions": {
+ "options": {
+ "caseSensitive": true,
+ "leftValue": "",
+ "typeValidation": "strict"
+ },
+ "conditions": [
+ {
+ "id": "c1",
+ "leftValue": "={{ $json.ok }}",
+ "rightValue": "",
+ "operator": {
+ "type": "boolean",
+ "operation": "false",
+ "singleValue": true
+ }
+ }
+ ],
+ "combinator": "and"
+ },
+ "options": {}
+ },
+ "id": "b1faed7b-476d-4ac3-b973-03d33aba96f3",
+ "name": "Is App Down?",
+ "type": "n8n-nodes-base.if",
+ "typeVersion": 2,
+ "position": [
+ 880,
+ 200
+ ]
+ },
+ {
+ "parameters": {
+ "authentication": "webhook",
+ "content": "={{ $json.alert }}",
+ "options": {}
+ },
+ "id": "015c5a88-e3f6-420a-a60b-7cb9a143b80f",
+ "name": "Discord: Down Alert",
+ "type": "n8n-nodes-base.discord",
+ "typeVersion": 2,
+ "position": [
+ 1120,
+ 200
+ ],
+ "onError": "continueRegularOutput"
+ },
+ {
+ "parameters": {
+ "rule": {
+ "interval": [
+ {
+ "field": "days",
+ "daysInterval": 1,
+ "triggerAtHour": 9
+ }
+ ]
+ }
+ },
+ "id": "f1c8aef9-0453-4964-b507-2b18e55884f7",
+ "name": "Daily 9AM",
+ "type": "n8n-nodes-base.scheduleTrigger",
+ "typeVersion": 1.2,
+ "position": [
+ 0,
+ 460
+ ]
+ },
+ {
+ "parameters": {
+ "jsCode": "// Daily summary from stats collected by the 5-minute checks, then reset.\nconst s = $getWorkflowStaticData('global');\nconst checks =
+s.checks || 0;\nconst fails = s.failures || 0;\nconst avg = checks ? Math.round(s.totalMs / checks) : 0;\nconst uptime = checks ? (((checks - fails) /
+ checks) * 100).toFixed(2) : 'n/a';\nconst content = `■ **Daily Uptime Summary**\\nChecks: ${checks}\\nFailures: ${fails}\\nUptime: ${uptime}%\\nAvg
+response: ${avg} ms\\nSlowest: ${s.maxMs || 0} ms`;\ns.checks = 0; s.failures = 0; s.totalMs = 0; s.maxMs = 0;\nreturn [{ json: { content } }];"
+ },
+ "id": "2212fd05-dc07-4534-abf2-1864b25264a1",
+ "name": "Build Summary",
+ "type": "n8n-nodes-base.code",
+ "typeVersion": 2,
+ "position": [
+ 440,
+ 460
+ ]
+ },
+ {
+ "parameters": {
+ "authentication": "webhook",
+ "content": "={{ $json.content }}",
+ "options": {}
+ },
+ "id": "7ce3a75c-666a-4167-a3f1-aeb2687fcf4c",
+ "name": "Discord: Daily Summary",
+ "type": "n8n-nodes-base.discord",
+ "typeVersion": 2,
+ "position": [
+ 660,
+ 460
+ ],
+ "onError": "continueRegularOutput"
+ }
+ ],
+ "connections": {
+ "Every 5 Minutes": {
+ "main": [
+ [
+ {
+ "node": "Start Timer",
+ "type": "main",
+ "index": 0
+ }
+ ]
+ ]
+ },
+ "Start Timer": {
+ "main": [
+ [
+ {
+ "node": "HTTP Health Check",
+ "type": "main",
+ "index": 0
+ }
+ ]
+ ]
+ },
+ "HTTP Health Check": {
+ "main": [
+ [
+ {
+ "node": "Evaluate Result",
+ "type": "main",
+ "index": 0
+ }
+ ]
+ ]
+ },
+ "Evaluate Result": {
+ "main": [
+ [
+ {
+ "node": "Is App Down?",
+ "type": "main",
+ "index": 0
+ }
+ ]
+ ]
+ },
+ "Is App Down?": {
+ "main": [
+ [
+ {
+ "node": "Discord: Down Alert",
+ "type": "main",
+ "index": 0
+ }
+ ],
+ []
+ ]
+ },
+ "Daily 9AM": {
+ "main": [
+ [
+ {
+ "node": "Build Summary",
+ "type": "main",
+ "index": 0
+ }
+ ]
+ ]
+ },
+ "Build Summary": {
+ "main": [
+ [
+ {
+ "node": "Discord: Daily Summary",
+ "type": "main",
+ "index": 0
+ }
+ ]
+ ]
+ }
+ },
+ "active": false,
+ "settings": {
+ "executionOrder": "v1"
+ },
+ "pinData": {},
+ "meta": {
+ "instanceId": "exported"
+ }
+}
